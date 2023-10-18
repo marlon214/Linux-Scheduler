@@ -125,6 +125,9 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
+  //allocate 10 tickets per process
+  p->tixCount=10;
+  
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -441,6 +444,37 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+// void
+// scheduler(void)
+// {
+//   struct proc *p;
+//   struct cpu *c = mycpu();
+  
+//   c->proc = 0;
+//   for(;;){
+//     // Avoid deadlock by ensuring that devices can interrupt.
+//     intr_on();
+
+//     for(p = proc; p < &proc[NPROC]; p++) {
+//       acquire(&p->lock);
+//       if(p->state == RUNNABLE) {
+//         // Switch to chosen process.  It is the process's job
+//         // to release its lock and then reacquire it
+//         // before jumping back to us.
+//         p->state = RUNNING;
+//         c->proc = p;
+//         swtch(&c->context, &p->context);
+
+//         // Process is done running for now.
+//         // It should have changed its p->state before coming back.
+//         c->proc = 0;
+//       }
+//       release(&p->lock);
+//     }
+//   }
+// }
+
+// edited schedualer
 void
 scheduler(void)
 {
@@ -452,21 +486,46 @@ scheduler(void)
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
+    // all tickets allocated for runnable processes
+    int total=0;
+    for(p = proc; p < &proc[NPROC]; p++){
+      if(p->state == RUNNABLE){
+        total= total + p->tixCount;
+      }
+    }
+    //lottery num is chosen from our RNG within the range of 0-99
+    int lottery=sys_srand()%total;
+    
+    //specifies where I am within our secific range
+    int lotteryCounter=0;
+
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
+      // increments our lotteryCounter
+      lotteryCounter= lotteryCounter + p->tixCount;
+
+      if(p->state == RUNNABLE) {
+        //runs process if out lottery number within our range
+        if(lotteryCounter >= lottery){
+          // Switch to chosen process.  It is the process's job
+          // to release its lock and then reacquire it
+          // before jumping back to us.
+          p->state = RUNNING;
+          c->proc = p;
+          swtch(&c->context, &p->context);
+
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+          c->proc = 0;
+          //release lock to detemine the next lottery number
+          release(&p->lock);
+          break;
+        }
+        
       }
       release(&p->lock);
+
     }
   }
 }
